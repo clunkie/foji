@@ -9,11 +9,11 @@ import (
 	"strings"
 
 	"github.com/codemodus/kace"
-	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/rs/zerolog"
 
 	"github.com/gofoji/foji/cfg"
 	"github.com/gofoji/foji/input/openapi"
+	"github.com/gofoji/foji/input/openapi/spec"
 )
 
 const (
@@ -88,7 +88,7 @@ func (o *OpenAPIFileContext) RefToName(ref string) string {
 	return modelPackage + "." + o.ToCase(parts[len(parts)-1])
 }
 
-func (o *OpenAPIFileContext) GetTypeName(pkg string, s *openapi3.SchemaRef) string {
+func (o *OpenAPIFileContext) GetTypeName(pkg string, s *spec.SchemaRef) string {
 	ref := o.RefToName(s.Ref)
 
 	if t, ok := o.Maps.Type[ref]; ok {
@@ -133,22 +133,22 @@ func HasExtensionValue(extensions map[string]any, ext string) bool {
 	return true
 }
 
-func (o *OpenAPIFileContext) OpHasExtension(op *openapi3.Operation, ext string) bool {
+func (o *OpenAPIFileContext) OpHasExtension(op *spec.Operation, ext string) bool {
 	return HasExtensionValue(op.Extensions, ext)
 }
 
-func (o *OpenAPIFileContext) SecurityHasExtension(scheme *openapi3.SecuritySchemeRef, ext string) bool {
+func (o *OpenAPIFileContext) SecurityHasExtension(scheme *spec.SecuritySchemeRef, ext string) bool {
 	return HasExtensionValue(scheme.Value.Extensions, ext)
 }
 
-func (o *OpenAPIFileContext) HasExtension(s *openapi3.SchemaRef, ext string) bool {
+func (o *OpenAPIFileContext) HasExtension(s *spec.SchemaRef, ext string) bool {
 	_, ok := s.Value.Extensions[ext]
 
 	return ok
 }
 
 //nolint:cyclop
-func (o *OpenAPIFileContext) GetType(currentPackage, name string, s *openapi3.SchemaRef) string {
+func (o *OpenAPIFileContext) GetType(currentPackage, name string, s *spec.SchemaRef) string {
 	if s == nil {
 		return ""
 	}
@@ -162,8 +162,8 @@ func (o *OpenAPIFileContext) GetType(currentPackage, name string, s *openapi3.Sc
 	}
 
 	schemaType := ""
-	if s.Value.Type != nil && len(*s.Value.Type) == 1 {
-		schemaType = (*s.Value.Type)[0]
+	if len(s.Value.Type) == 1 {
+		schemaType = s.Value.Type[0]
 	}
 
 	if s.Value.Format != "" {
@@ -184,7 +184,7 @@ func (o *OpenAPIFileContext) GetType(currentPackage, name string, s *openapi3.Sc
 		return "forms.File"
 	}
 
-	if s.Value.Type.Is("object") || s.Value.Type.Is("") || s.Value.Type == nil {
+	if s.Value.Type.Is("object") || s.Value.Type.Is("") || len(s.Value.Type) == 0 {
 		if len(o.SchemaProperties(s)) == 0 {
 			if t, ok := o.Maps.Type[schemaType]; ok {
 				return o.CheckPackage(t, currentPackage)
@@ -237,7 +237,7 @@ func (o *OpenAPIFileContext) Init() error {
 	return nil
 }
 
-func (o *OpenAPIFileContext) ComponentSchemas() openapi3.Schemas {
+func (o *OpenAPIFileContext) ComponentSchemas() spec.Schemas {
 	if o.API.Components == nil {
 		return nil
 	}
@@ -245,7 +245,7 @@ func (o *OpenAPIFileContext) ComponentSchemas() openapi3.Schemas {
 	return o.API.Components.Schemas
 }
 
-func (o *OpenAPIFileContext) ComponentParameters() openapi3.ParametersMap {
+func (o *OpenAPIFileContext) ComponentParameters() spec.ParametersMap {
 	if o.API.Components == nil {
 		return nil
 	}
@@ -276,13 +276,13 @@ func (o *OpenAPIFileContext) CheckAllTypes(pkg string, types ...string) string {
 	return ""
 }
 
-func hasValidation(s *openapi3.Schema) bool {
+func hasValidation(s *spec.Schema) bool {
 	return s.Min != nil || s.Max != nil || s.MultipleOf != nil || // Number
 		s.MinLength > 0 || s.MaxLength != nil || len(s.Pattern) > 0 || // String
 		s.MinItems > 0 || s.MaxItems != nil // Array
 }
 
-func (o *OpenAPIFileContext) HasValidation(s *openapi3.SchemaRef) bool {
+func (o *OpenAPIFileContext) HasValidation(s *spec.SchemaRef) bool {
 	if hasValidation(s.Value) {
 		return true
 	}
@@ -297,7 +297,7 @@ func (o *OpenAPIFileContext) HasValidation(s *openapi3.SchemaRef) bool {
 }
 
 // IsDefaultEnum helper that checks if an enumerated type is overridden (specified externally).
-func (o *OpenAPIFileContext) IsDefaultEnum(name string, s *openapi3.SchemaRef) bool {
+func (o *OpenAPIFileContext) IsDefaultEnum(name string, s *spec.SchemaRef) bool {
 	if len(s.Value.Enum) == 0 {
 		return false
 	}
@@ -307,12 +307,12 @@ func (o *OpenAPIFileContext) IsDefaultEnum(name string, s *openapi3.SchemaRef) b
 	return !ok
 }
 
-func (o *OpenAPIFileContext) HasRequiredProperties(s *openapi3.SchemaRef) bool {
+func (o *OpenAPIFileContext) HasRequiredProperties(s *spec.SchemaRef) bool {
 	return len(o.RequiredProperties(s)) > 0
 }
 
 // IsRequiredProperty helper that checks if a property is required.
-func (o *OpenAPIFileContext) IsRequiredProperty(name string, s *openapi3.SchemaRef) bool {
+func (o *OpenAPIFileContext) IsRequiredProperty(name string, s *spec.SchemaRef) bool {
 	// property is required if it is listed in the schema's required properties
 	if slices.Contains(s.Value.Required, name) {
 		return true
@@ -354,8 +354,8 @@ func (o *OpenAPIFileContext) IsRequiredProperty(name string, s *openapi3.SchemaR
 	return false
 }
 
-func (o *OpenAPIFileContext) RequiredProperties(schema *openapi3.SchemaRef) openapi3.Schemas {
-	out := openapi3.Schemas{}
+func (o *OpenAPIFileContext) RequiredProperties(schema *spec.SchemaRef) spec.Schemas {
+	out := spec.Schemas{}
 
 	for name, ref := range o.SchemaProperties(schema) {
 		if o.IsRequiredProperty(name, schema) {
@@ -366,7 +366,7 @@ func (o *OpenAPIFileContext) RequiredProperties(schema *openapi3.SchemaRef) open
 	return out
 }
 
-func (o *OpenAPIFileContext) SchemaPropertiesHaveDefaults(schema *openapi3.SchemaRef) bool {
+func (o *OpenAPIFileContext) SchemaPropertiesHaveDefaults(schema *spec.SchemaRef) bool {
 	for _, v := range o.SchemaProperties(schema) {
 		if v.Value.Default != nil {
 			return true
@@ -376,13 +376,13 @@ func (o *OpenAPIFileContext) SchemaPropertiesHaveDefaults(schema *openapi3.Schem
 	return false
 }
 
-func (o *OpenAPIFileContext) SchemaProperties(schema *openapi3.SchemaRef) openapi3.Schemas {
-	out := openapi3.Schemas{}
+func (o *OpenAPIFileContext) SchemaProperties(schema *spec.SchemaRef) spec.Schemas {
+	out := spec.Schemas{}
 
 	return schemaPropertiesWithEmbedded(schema, out)
 }
 
-func schemaPropertiesWithEmbedded(schema *openapi3.SchemaRef, out openapi3.Schemas) openapi3.Schemas {
+func schemaPropertiesWithEmbedded(schema *spec.SchemaRef, out spec.Schemas) spec.Schemas {
 	maps.Copy(out, schema.Value.Properties)
 
 	for _, subSchema := range schema.Value.AllOf {
@@ -392,8 +392,8 @@ func schemaPropertiesWithEmbedded(schema *openapi3.SchemaRef, out openapi3.Schem
 	return out
 }
 
-func (o *OpenAPIFileContext) SchemaEnums(schema *openapi3.SchemaRef) openapi3.Schemas {
-	out := openapi3.Schemas{}
+func (o *OpenAPIFileContext) SchemaEnums(schema *spec.SchemaRef) spec.Schemas {
+	out := spec.Schemas{}
 
 	for k, v := range o.SchemaProperties(schema) {
 		if len(v.Value.Enum) > 0 {
@@ -404,7 +404,7 @@ func (o *OpenAPIFileContext) SchemaEnums(schema *openapi3.SchemaRef) openapi3.Sc
 	return out
 }
 
-func (o *OpenAPIFileContext) GetRequestBody(op *openapi3.Operation) *OpBody {
+func (o *OpenAPIFileContext) GetRequestBody(op *spec.Operation) *OpBody {
 	if op.RequestBody != nil && op.RequestBody.Value != nil {
 		mediaType := op.RequestBody.Value.Content.Get(ApplicationJSON)
 		if mediaType != nil {
@@ -430,7 +430,7 @@ func (o *OpenAPIFileContext) GetRequestBody(op *openapi3.Operation) *OpBody {
 	return nil
 }
 
-func (o *OpenAPIFileContext) GetRequestBodySchemas(op *openapi3.Operation) []OpBody {
+func (o *OpenAPIFileContext) GetRequestBodySchemas(op *spec.Operation) []OpBody {
 	if op == nil || op.RequestBody == nil || op.RequestBody.Value == nil {
 		return nil
 	}
@@ -460,11 +460,11 @@ func happyStatusCode(key string) bool {
 	return key[0] == '2' || key[0] == '3'
 }
 
-func (o *OpenAPIFileContext) GetOpHappyResponse(pkg string, op *openapi3.Operation) OpResponse {
+func (o *OpenAPIFileContext) GetOpHappyResponse(pkg string, op *spec.Operation) OpResponse {
 	supportedResponseContentTypes := []string{ApplicationJSON, ApplicationJSONL, TextPlain, TextHTML, TextCSV}
 
-	// kin-openapi does not preserve response ordering, so we order here by "happy key"
-	// to make sure we choose a happy response deterministically
+	// Responses are held in a map, so order here by "happy key" to make sure we
+	// choose a happy response deterministically
 
 	happyKeys := []string{}
 
@@ -530,8 +530,8 @@ func mapKeysSorted[T any](in map[string]T) []string {
 	return out
 }
 
-func (o *OpenAPIFileContext) OpParams(path *openapi3.PathItem, op *openapi3.Operation) openapi3.Parameters {
-	out := make(openapi3.Parameters, 0, len(path.Parameters)+len(op.Parameters))
+func (o *OpenAPIFileContext) OpParams(path *spec.PathItem, op *spec.Operation) spec.Parameters {
+	out := make(spec.Parameters, 0, len(path.Parameters)+len(op.Parameters))
 
 	out = append(out, path.Parameters...)
 	out = append(out, op.Parameters...)
@@ -563,7 +563,7 @@ func (o *OpenAPIFileContext) DefaultValues(val string) []string {
 	return nil
 }
 
-func (o *OpenAPIFileContext) ParamIsOptionalType(param *openapi3.ParameterRef) bool {
+func (o *OpenAPIFileContext) ParamIsOptionalType(param *spec.ParameterRef) bool {
 	if param.Value.Required {
 		return false
 	}
@@ -580,27 +580,27 @@ func (o *OpenAPIFileContext) ParamIsOptionalType(param *openapi3.ParameterRef) b
 	return param.Value.Schema.Value.Default == nil
 }
 
-func (o *OpenAPIFileContext) ParamIsEnum(param *openapi3.ParameterRef) bool {
+func (o *OpenAPIFileContext) ParamIsEnum(param *spec.ParameterRef) bool {
 	return len(param.Value.Schema.Value.Enum) > 0
 }
 
-func (o *OpenAPIFileContext) ParamIsEnumArray(param *openapi3.ParameterRef) bool {
+func (o *OpenAPIFileContext) ParamIsEnumArray(param *spec.ParameterRef) bool {
 	return param.Value.Schema.Value.Items != nil && len(param.Value.Schema.Value.Items.Value.Enum) > 0
 }
 
-func (o *OpenAPIFileContext) SchemaIsEnum(schema *openapi3.SchemaRef) bool {
+func (o *OpenAPIFileContext) SchemaIsEnum(schema *spec.SchemaRef) bool {
 	return len(schema.Value.Enum) > 0
 }
 
-func (o *OpenAPIFileContext) SchemaIsEnumArray(schema *openapi3.SchemaRef) bool {
+func (o *OpenAPIFileContext) SchemaIsEnumArray(schema *spec.SchemaRef) bool {
 	return schema.Value.Items != nil && len(schema.Value.Items.Value.Enum) > 0
 }
 
-func (o *OpenAPIFileContext) SchemaContainsAllOf(schema *openapi3.SchemaRef) bool {
+func (o *OpenAPIFileContext) SchemaContainsAllOf(schema *spec.SchemaRef) bool {
 	return schema != nil && len(schema.Value.AllOf) > 0
 }
 
-func (o *OpenAPIFileContext) SchemaIsComplex(schema *openapi3.SchemaRef) bool {
+func (o *OpenAPIFileContext) SchemaIsComplex(schema *spec.SchemaRef) bool {
 	if schema == nil || schema.Ref != "" {
 		return false
 	}
@@ -620,35 +620,35 @@ func (o *OpenAPIFileContext) SchemaIsComplex(schema *openapi3.SchemaRef) bool {
 	return schema.Value.Items.Ref == "" && schema.Value.Items.Value.Type.Is("object")
 }
 
-func (o *OpenAPIFileContext) SchemaIsObject(schema *openapi3.SchemaRef) bool {
+func (o *OpenAPIFileContext) SchemaIsObject(schema *spec.SchemaRef) bool {
 	return schema.Value.Type.Is("object") || schema.Value.Type.Is("string") // to catch timestamps and uuids
 }
 
-func (o *OpenAPIFileContext) GetOpHappyResponseKey(op *openapi3.Operation) string {
+func (o *OpenAPIFileContext) GetOpHappyResponseKey(op *spec.Operation) string {
 	// passing "" as pkg because here we only need the Key part for which pkg is not needed
 	opResponse := o.GetOpHappyResponse("", op)
 	return opResponse.Key
 }
 
-func (o *OpenAPIFileContext) GetOpHappyResponseMimeType(op *openapi3.Operation) string {
+func (o *OpenAPIFileContext) GetOpHappyResponseMimeType(op *spec.Operation) string {
 	// passing "" as pkg because here we only need the MimeType part for which pkg is not needed
 	opResponse := o.GetOpHappyResponse("", op)
 	return opResponse.String()
 }
 
-func (o *OpenAPIFileContext) GetOpHappyResponseType(pkg string, op *openapi3.Operation) string {
+func (o *OpenAPIFileContext) GetOpHappyResponseType(pkg string, op *spec.Operation) string {
 	opResponse := o.GetOpHappyResponse(pkg, op)
 	return opResponse.GoType
 }
 
-func (o *OpenAPIFileContext) GetOpHappyResponseHeaders(pkg string, op *openapi3.Operation) []string {
+func (o *OpenAPIFileContext) GetOpHappyResponseHeaders(pkg string, op *spec.Operation) []string {
 	opResponse := o.GetOpHappyResponse(pkg, op)
 	return opResponse.Headers
 }
 
 /* Auth Focused Helpers */
 
-func (o *OpenAPIFileContext) OpSecurity(op *openapi3.Operation) openapi3.SecurityRequirements {
+func (o *OpenAPIFileContext) OpSecurity(op *spec.Operation) spec.SecurityRequirements {
 	if op.Security != nil {
 		return *op.Security
 	}
@@ -656,7 +656,7 @@ func (o *OpenAPIFileContext) OpSecurity(op *openapi3.Operation) openapi3.Securit
 	return o.API.Security
 }
 
-func hasAuthorization(security openapi3.SecurityRequirements) bool {
+func hasAuthorization(security spec.SecurityRequirements) bool {
 	for _, ss := range security {
 		for _, scopes := range ss {
 			if len(scopes) > 0 {
@@ -689,7 +689,7 @@ func (o *OpenAPIFileContext) HasAuthorization() bool {
 	return false
 }
 
-func (o *OpenAPIFileContext) IsSimpleAuth(op *openapi3.Operation) bool {
+func (o *OpenAPIFileContext) IsSimpleAuth(op *spec.Operation) bool {
 	s := o.OpSecurity(op)
 	if len(s) == 0 {
 		return true
@@ -756,7 +756,7 @@ func (o *OpenAPIFileContext) HasBearerAuth() bool {
 	return false
 }
 
-func (o *OpenAPIFileContext) HasAnyAuth(op *openapi3.Operation) bool {
+func (o *OpenAPIFileContext) HasAnyAuth(op *spec.Operation) bool {
 	s := o.OpSecurity(op)
 	if len(s) == 0 {
 		return false
@@ -771,7 +771,7 @@ func (o *OpenAPIFileContext) HasAnyAuth(op *openapi3.Operation) bool {
 	return false
 }
 
-func (o *OpenAPIFileContext) RequiresAuthUser(op *openapi3.Operation) bool {
+func (o *OpenAPIFileContext) RequiresAuthUser(op *spec.Operation) bool {
 	s := o.OpSecurity(op)
 	if len(s) == 0 {
 		return false

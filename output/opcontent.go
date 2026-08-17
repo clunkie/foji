@@ -1,6 +1,6 @@
 package output
 
-import "github.com/getkin/kin-openapi/openapi3"
+import "github.com/gofoji/foji/input/openapi/spec"
 
 const (
 	ApplicationJSON  = "application/json"
@@ -49,7 +49,7 @@ type OpResponse struct {
 	MimeType
 
 	Key       string
-	MediaType *openapi3.MediaType
+	MediaType *spec.MediaType
 	GoType    string
 	Headers   []string
 }
@@ -57,5 +57,5 @@ type OpResponse struct {
 type OpBody struct {
 	MimeType
 
-	Schema *openapi3.SchemaRef
+	Schema *spec.SchemaRef
 }

@@ -1,10 +1,10 @@
 package output
 
 import (
+	"os"
 	"strings"
 	"testing"
 
-	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -12,17 +12,28 @@ import (
 	"github.com/gofoji/foji/cfg"
 	"github.com/gofoji/foji/errs"
 	"github.com/gofoji/foji/foji"
+	"github.com/gofoji/foji/input"
 	"github.com/gofoji/foji/input/openapi"
+	"github.com/gofoji/foji/input/openapi/spec"
 	"github.com/gofoji/foji/stringlist"
 )
 
-func loadTestDoc(t *testing.T) *openapi3.T {
+func loadTestDoc(t *testing.T) *spec.T {
 	t.Helper()
 
-	doc, err := openapi3.NewLoader().LoadFromFile("testdata/openapi.yaml")
+	const source = "testdata/openapi.yaml"
+
+	content, err := os.ReadFile(source)
 	require.NoError(t, err)
 
-	return doc
+	groups, err := openapi.Parse(t.Context(), zerolog.Nop(), []input.FileGroup{
+		{Files: []input.File{{Source: source, Name: source, Content: content}}},
+	})
+	require.NoError(t, err)
+	require.Len(t, groups, 1)
+	require.Len(t, groups[0], 1)
+
+	return groups[0][0].API
 }
 
 func TestGetOpHappyResponse(t *testing.T) {
@@ -222,7 +233,7 @@ func TestGetTypeName(t *testing.T) {
 
 	ref := doc.Components.Schemas["Nest"]
 	// Manually create a schema ref with a ref path
-	s := &openapi3.SchemaRef{Ref: "#/components/schemas/Nest", Value: ref.Value}
+	s := &spec.SchemaRef{Ref: "#/components/schemas/Nest", Value: ref.Value}
 	got := ctx.GetTypeName("foreign", s)
 	assert.Equal(t, "local.Nest", got)
 
@@ -290,7 +301,7 @@ func TestComponentSchemas(t *testing.T) {
 }
 
 func TestComponentSchemas_NilComponents(t *testing.T) {
-	ctx := getContext(&openapi3.T{})
+	ctx := getContext(&spec.T{})
 	assert.Nil(t, ctx.ComponentSchemas())
 }
 
@@ -304,7 +315,7 @@ func TestComponentParameters(t *testing.T) {
 }
 
 func TestComponentParameters_NilComponents(t *testing.T) {
-	ctx := getContext(&openapi3.T{})
+	ctx := getContext(&spec.T{})
 	assert.Nil(t, ctx.ComponentParameters())
 }
 
@@ -465,7 +476,7 @@ func TestSchemaIsComplex(t *testing.T) {
 	assert.False(t, ctx.SchemaIsComplex(nil))
 
 	// has ref -> not complex (it's a reference)
-	refSchema := &openapi3.SchemaRef{Ref: "#/components/schemas/Nest", Value: &openapi3.Schema{}}
+	refSchema := &spec.SchemaRef{Ref: "#/components/schemas/Nest", Value: &spec.Schema{}}
 	assert.False(t, ctx.SchemaIsComplex(refSchema))
 
 	// object type -> complex
@@ -701,7 +712,7 @@ func TestHasAuthentication(t *testing.T) {
 	assert.True(t, ctx.HasAuthentication())
 
 	// No security schemes
-	ctx2 := getContext(&openapi3.T{})
+	ctx2 := getContext(&spec.T{})
 	assert.False(t, ctx2.HasAuthentication())
 }
 
@@ -714,22 +725,22 @@ func TestHasAuthorization(t *testing.T) {
 
 func TestHasAuthorization_NoScopes(t *testing.T) {
 	// Build a spec with security but no scopes
-	spec := &openapi3.T{
+	doc := &spec.T{
 		OpenAPI: "3.0.2",
-		Info:    &openapi3.Info{Title: "Test", Version: "1.0"},
-		Security: openapi3.SecurityRequirements{
+		Info:    &spec.Info{Title: "Test", Version: "1.0"},
+		Security: spec.SecurityRequirements{
 			{"HeaderAuth": {}},
 		},
-		Paths: &openapi3.Paths{},
+		Paths: &spec.Paths{},
 	}
-	spec.Paths.Set("/test", &openapi3.PathItem{
-		Get: &openapi3.Operation{
+	doc.Paths.Set("/test", &spec.PathItem{
+		Get: &spec.Operation{
 			OperationID: "test",
-			Responses:   openapi3.NewResponses(),
+			Responses:   spec.NewResponses(),
 		},
 	})
 
-	ctx := getContext(spec)
+	ctx := getContext(doc)
 	assert.False(t, ctx.HasAuthorization())
 }
 
@@ -761,22 +772,22 @@ func TestHasComplexAuth(t *testing.T) {
 }
 
 func TestHasComplexAuth_AllSimple(t *testing.T) {
-	spec := &openapi3.T{
+	doc := &spec.T{
 		OpenAPI: "3.0.2",
-		Info:    &openapi3.Info{Title: "Test", Version: "1.0"},
-		Paths:   &openapi3.Paths{},
+		Info:    &spec.Info{Title: "Test", Version: "1.0"},
+		Paths:   &spec.Paths{},
 	}
-	spec.Paths.Set("/test", &openapi3.PathItem{
-		Get: &openapi3.Operation{
+	doc.Paths.Set("/test", &spec.PathItem{
+		Get: &spec.Operation{
 			OperationID: "test",
-			Security: &openapi3.SecurityRequirements{
+			Security: &spec.SecurityRequirements{
 				{"api_key": {}},
 			},
-			Responses: openapi3.NewResponses(),
+			Responses: spec.NewResponses(),
 		},
 	})
 
-	ctx := getContext(spec)
+	ctx := getContext(doc)
 	assert.False(t, ctx.HasComplexAuth())
 }
 
@@ -787,18 +798,18 @@ func TestHasBasicAuth(t *testing.T) {
 }
 
 func TestHasBasicAuth_NonePresent(t *testing.T) {
-	spec := &openapi3.T{
+	doc := &spec.T{
 		OpenAPI: "3.0.2",
-		Info:    &openapi3.Info{Title: "Test", Version: "1.0"},
-		Components: &openapi3.Components{
-			SecuritySchemes: openapi3.SecuritySchemes{
-				"api_key": &openapi3.SecuritySchemeRef{
-					Value: &openapi3.SecurityScheme{Type: "apiKey", In: "header", Name: "X-API-Key"},
+		Info:    &spec.Info{Title: "Test", Version: "1.0"},
+		Components: &spec.Components{
+			SecuritySchemes: spec.SecuritySchemes{
+				"api_key": &spec.SecuritySchemeRef{
+					Value: &spec.SecurityScheme{Type: "apiKey", In: "header", Name: "X-API-Key"},
 				},
 			},
 		},
 	}
-	ctx := getContext(spec)
+	ctx := getContext(doc)
 	assert.False(t, ctx.HasBasicAuth())
 }
 
@@ -809,18 +820,18 @@ func TestHasBearerAuth(t *testing.T) {
 }
 
 func TestHasBearerAuth_NonePresent(t *testing.T) {
-	spec := &openapi3.T{
+	doc := &spec.T{
 		OpenAPI: "3.0.2",
-		Info:    &openapi3.Info{Title: "Test", Version: "1.0"},
-		Components: &openapi3.Components{
-			SecuritySchemes: openapi3.SecuritySchemes{
-				"basic": &openapi3.SecuritySchemeRef{
-					Value: &openapi3.SecurityScheme{Type: "http", Scheme: "basic"},
+		Info:    &spec.Info{Title: "Test", Version: "1.0"},
+		Components: &spec.Components{
+			SecuritySchemes: spec.SecuritySchemes{
+				"basic": &spec.SecuritySchemeRef{
+					Value: &spec.SecurityScheme{Type: "http", Scheme: "basic"},
 				},
 			},
 		},
 	}
-	ctx := getContext(spec)
+	ctx := getContext(doc)
 	assert.False(t, ctx.HasBearerAuth())
 }
 
@@ -1099,7 +1110,7 @@ func TestGetTypeName_WithOverride(t *testing.T) {
 
 	// Add a type map override for a ref name
 	ctx.Maps.Type["local.Nest"] = "CustomNest"
-	s := &openapi3.SchemaRef{Ref: "#/components/schemas/Nest", Value: doc.Components.Schemas["Nest"].Value}
+	s := &spec.SchemaRef{Ref: "#/components/schemas/Nest", Value: doc.Components.Schemas["Nest"].Value}
 	got := ctx.GetTypeName("foreign", s)
 	assert.Equal(t, "CustomNest", got)
 }
@@ -1139,11 +1150,11 @@ func TestHasAnyAuth_EmptyGroups(t *testing.T) {
 
 func TestHasValidation_WithAllOf(t *testing.T) {
 	// Create a schema where validation is in an allOf sub-schema
-	schema := &openapi3.SchemaRef{
-		Value: &openapi3.Schema{
-			AllOf: openapi3.SchemaRefs{
+	schema := &spec.SchemaRef{
+		Value: &spec.Schema{
+			AllOf: spec.SchemaRefs{
 				{
-					Value: &openapi3.Schema{
+					Value: &spec.Schema{
 						MinLength: 5,
 					},
 				},
@@ -1157,11 +1168,11 @@ func TestHasValidation_WithAllOf(t *testing.T) {
 
 func TestHasValidation_WithNestedProperty(t *testing.T) {
 	// Validation in a nested property
-	schema := &openapi3.SchemaRef{
-		Value: &openapi3.Schema{
-			Properties: openapi3.Schemas{
-				"nested": &openapi3.SchemaRef{
-					Value: &openapi3.Schema{
+	schema := &spec.SchemaRef{
+		Value: &spec.Schema{
+			Properties: spec.Schemas{
+				"nested": &spec.SchemaRef{
+					Value: &spec.Schema{
 						MinLength: 1,
 					},
 				},
@@ -1175,7 +1186,7 @@ func TestHasValidation_WithNestedProperty(t *testing.T) {
 
 /* Helpers */
 
-func getContext(doc *openapi3.T) OpenAPIFileContext {
+func getContext(doc *spec.T) OpenAPIFileContext {
 	defaultConfig, err := cfg.LoadYaml(foji.DefaultConfig)
 	if err != nil {
 		panic(err)
@@ -1198,7 +1209,7 @@ func getContext(doc *openapi3.T) OpenAPIFileContext {
 	return ctx
 }
 
-func getSchema(doc *openapi3.T, name string) *openapi3.SchemaRef {
+func getSchema(doc *spec.T, name string) *spec.SchemaRef {
 	for key, value := range doc.Components.Schemas {
 		if key == name {
 			return value
@@ -1208,7 +1219,7 @@ func getSchema(doc *openapi3.T, name string) *openapi3.SchemaRef {
 	return nil
 }
 
-func getProperty(schema *openapi3.SchemaRef, name string) *openapi3.SchemaRef {
+func getProperty(schema *spec.SchemaRef, name string) *spec.SchemaRef {
 	if schema == nil {
 		return nil
 	}
@@ -1229,7 +1240,7 @@ func getProperty(schema *openapi3.SchemaRef, name string) *openapi3.SchemaRef {
 	return nil
 }
 
-func evalPath(doc *openapi3.T, path string) *openapi3.SchemaRef {
+func evalPath(doc *spec.T, path string) *spec.SchemaRef {
 	pathStep := strings.Split(path, ".")
 
 	i := 1

@@ -119,6 +119,94 @@ func TestParse_EmptyFileGroup(t *testing.T) {
 	assert.Empty(t, result[0])
 }
 
+// A self-referential schema must resolve to a single shared *spec.Schema rather
+// than recursing forever while being converted.
+func TestParse_RecursiveRef(t *testing.T) {
+	spec := []byte(`openapi: "3.0.2"
+info:
+  title: Test
+  version: "1.0"
+paths: {}
+components:
+  schemas:
+    Node:
+      type: object
+      properties:
+        name:
+          type: string
+        children:
+          type: array
+          items:
+            $ref: "#/components/schemas/Node"
+`)
+
+	result, err := Parse(context.Background(), zerolog.Nop(), []input.FileGroup{
+		{Files: []input.File{{Source: "test.yaml", Content: spec}}},
+	})
+	require.NoError(t, err)
+
+	node := result[0][0].API.Components.Schemas["Node"]
+	require.NotNil(t, node)
+
+	children := node.Value.Properties["children"]
+	require.NotNil(t, children)
+
+	items := children.Value.Items
+	require.NotNil(t, items)
+	assert.Equal(t, "#/components/schemas/Node", items.Ref)
+	assert.Same(t, node.Value, items.Value, "a repeated $ref must resolve to the same schema")
+}
+
+// OpenAPI 3.0 spells exclusive bounds as a boolean modifier and 3.1 as the bound
+// itself; both must reach templates in the boolean form.
+func TestParse_ExclusiveBounds(t *testing.T) {
+	tests := map[string]struct {
+		version    string
+		constraint string
+		wantMin    float64
+	}{
+		"3.0 boolean modifier": {
+			version:    `"3.0.2"`,
+			constraint: "minimum: 2\n          exclusiveMinimum: true",
+			wantMin:    2,
+		},
+		"3.1 numeric bound": {
+			version:    `"3.1.0"`,
+			constraint: "exclusiveMinimum: 5",
+			wantMin:    5,
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			spec := []byte(`openapi: ` + test.version + `
+info:
+  title: Test
+  version: "1.0"
+paths: {}
+components:
+  schemas:
+    Bounded:
+      type: object
+      properties:
+        value:
+          type: integer
+          ` + test.constraint + `
+`)
+
+			result, err := Parse(context.Background(), zerolog.Nop(), []input.FileGroup{
+				{Files: []input.File{{Source: "test.yaml", Content: spec}}},
+			})
+			require.NoError(t, err)
+
+			value := result[0][0].API.Components.Schemas["Bounded"].Value.Properties["value"]
+			require.NotNil(t, value.Value.Min)
+			assert.InDelta(t, test.wantMin, *value.Value.Min, 0)
+			assert.True(t, value.Value.ExclusiveMin)
+		})
+	}
+}
+
 func TestParse_InvalidYAML(t *testing.T) {
 	inGroups := []input.FileGroup{
 		{

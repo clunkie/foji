@@ -30,23 +30,21 @@ func DB(p cfg.Process, fn cfg.FileHandler, logger zerolog.Logger, schemas db.DB,
 		DB:      schemas,
 	}
 
-	runner := NewProcessRunner(p.RootDir, fn, logger, simulate)
+	g := newGen(p, fn, logger, simulate)
 
-	err := runner.process(p.Output[DBAll], &ctx)
-	if err != nil {
-		return err
-	}
+	g.render(DBAll, &ctx)
 
 	for _, s := range schemas {
+		if g.err != nil {
+			break
+		}
+
 		schemaCtx := SchemaContext{
 			Schema:         *s,
 			SchemasContext: ctx,
 		}
 
-		err := runner.process(p.Output[DBSchema], &schemaCtx)
-		if err != nil {
-			return err
-		}
+		g.render(DBSchema, &schemaCtx)
 
 		for _, t := range s.Tables {
 			tableCtx := TableContext{
@@ -54,10 +52,7 @@ func DB(p cfg.Process, fn cfg.FileHandler, logger zerolog.Logger, schemas db.DB,
 				SchemasContext: ctx,
 			}
 
-			err := runner.process(p.Output[DBTable], &tableCtx)
-			if err != nil {
-				return err
-			}
+			g.render(DBTable, &tableCtx)
 		}
 
 		enumsCtx := EnumsContext{
@@ -65,10 +60,7 @@ func DB(p cfg.Process, fn cfg.FileHandler, logger zerolog.Logger, schemas db.DB,
 			SchemasContext: ctx,
 		}
 
-		err = runner.process(p.Output[DBEnums], &enumsCtx)
-		if err != nil {
-			return err
-		}
+		g.render(DBEnums, &enumsCtx)
 
 		for _, e := range s.Enums {
 			enumCtx := EnumContext{
@@ -76,14 +68,11 @@ func DB(p cfg.Process, fn cfg.FileHandler, logger zerolog.Logger, schemas db.DB,
 				SchemasContext: ctx,
 			}
 
-			err := runner.process(p.Output[DBEnum], &enumCtx)
-			if err != nil {
-				return err
-			}
+			g.render(DBEnum, &enumCtx)
 		}
 	}
 
-	return nil
+	return g.err
 }
 
 type SchemasContext struct { //nolint:recvcheck

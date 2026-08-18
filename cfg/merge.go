@@ -122,38 +122,31 @@ func (m Maps) Merge(from Maps) Maps {
 	return m
 }
 
-// Merge merges all properties from an ancestor ParamMap.
-func (pp ParamMap) Merge(from ParamMap) ParamMap {
-	out := pp
-	if out == nil {
-		out = ParamMap{}
+// mergeMissing copies every entry from an ancestor map that the receiver does
+// not already define, so locally declared keys always win.
+func mergeMissing[K comparable, V any](to, from map[K]V) map[K]V {
+	if to == nil {
+		to = map[K]V{}
 	}
 
-	for key, p := range from {
-		_, ok := out[key]
+	for key, value := range from {
+		_, ok := to[key]
 		if !ok {
-			out[key] = p
+			to[key] = value
 		}
 	}
 
-	return out
+	return to
+}
+
+// Merge merges all properties from an ancestor ParamMap.
+func (pp ParamMap) Merge(from ParamMap) ParamMap {
+	return mergeMissing(pp, from)
 }
 
 // Merge merges all properties from an ancestor FileInputMap.
 func (ff FileInputMap) Merge(from FileInputMap) FileInputMap {
-	out := ff
-	if out == nil {
-		out = FileInputMap{}
-	}
-
-	for key, p := range from {
-		_, ok := out[key]
-		if !ok {
-			out[key] = p
-		}
-	}
-
-	return out
+	return mergeMissing(ff, from)
 }
 
 // Merge merges all properties from an ancestor FileInput.

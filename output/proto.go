@@ -24,38 +24,33 @@ func Proto(p cfg.Process, fn cfg.FileHandler, l zerolog.Logger, groups proto.PBF
 		Context:    NewContext(p, l),
 		FileGroups: groups,
 	}
-	runner := NewProcessRunner(p.RootDir, fn, l, simulate)
+	g := newGen(p, fn, l, simulate)
 
-	err := runner.process(p.Output[ProtoAll], &base)
-	if err != nil {
-		return err
-	}
+	g.render(ProtoAll, &base)
 
 	for _, ff := range groups {
-		ctx := ProtoFileGroupContext{
+		if g.err != nil {
+			break
+		}
+
+		groupCtx := ProtoFileGroupContext{
 			ProtoContext: base,
 			FileGroup:    ff,
 		}
 
-		err := runner.process(p.Output[ProtoFileGroup], &ctx)
-		if err != nil {
-			return err
-		}
+		g.render(ProtoFileGroup, &groupCtx)
 
 		for _, f := range ff {
-			ctx := ProtoFileContext{
-				ProtoFileGroupContext: ctx,
+			fileCtx := ProtoFileContext{
+				ProtoFileGroupContext: groupCtx,
 				PBFile:                f,
 			}
 
-			err := runner.process(p.Output[ProtoFile], &ctx)
-			if err != nil {
-				return err
-			}
+			g.render(ProtoFile, &fileCtx)
 		}
 	}
 
-	return nil
+	return g.err
 }
 
 type ProtoContext struct {

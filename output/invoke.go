@@ -77,6 +77,48 @@ func (p ProcessRunner) doInit(data any) error {
 	return nil
 }
 
+// errWrapper lets a context annotate errors raised while it is being rendered.
+type errWrapper interface {
+	wrapErr(err error) error
+}
+
+// gen drives one generation run. Every generator walks a tree of contexts and
+// renders a set of templates at each level; gen holds the runner and the first
+// error so those walks read as a flat list of render steps instead of repeating
+// the same `if err != nil { return err }` at every level.
+type gen struct {
+	runner ProcessRunner
+	out    cfg.Output
+	err    error
+}
+
+func newGen(p cfg.Process, fn cfg.FileHandler, l zerolog.Logger, simulate bool) *gen {
+	return &gen{
+		runner: NewProcessRunner(p.RootDir, fn, l, simulate),
+		out:    p.Output,
+	}
+}
+
+// render runs the templates registered under key against ctx. Once an error has
+// been recorded every later call is a no-op, so callers chain without checking
+// in between and return g.err at the end.
+func (g *gen) render(key string, ctx any) {
+	if g.err != nil {
+		return
+	}
+
+	err := g.runner.process(g.out[key], ctx)
+	if err == nil {
+		return
+	}
+
+	if w, ok := ctx.(errWrapper); ok {
+		err = w.wrapErr(err)
+	}
+
+	g.err = err
+}
+
 func checkPermanentFlag(outputFile string) (bool, string) {
 	if strings.HasPrefix(outputFile, PermPrefix) {
 		return true, outputFile[1:]

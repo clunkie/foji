@@ -31,50 +31,42 @@ func SQL(p cfg.Process, fn cfg.FileHandler, l zerolog.Logger, fileGroups sql.Fil
 		FileGroups: fileGroups,
 	}
 
-	runner := NewProcessRunner(p.RootDir, fn, l, simulate)
+	g := newGen(p, fn, l, simulate)
 
-	err := runner.process(p.Output[SQLAll], &base)
-	if err != nil {
-		return err
-	}
+	g.render(SQLAll, &base)
 
 	for _, ff := range fileGroups {
-		ctx := SQLFileGroupContext{
+		if g.err != nil {
+			break
+		}
+
+		groupCtx := SQLFileGroupContext{
 			SQLContext: base,
 			Files:      ff,
 		}
 
-		err := runner.process(p.Output[SQLFiles], &ctx)
-		if err != nil {
-			return err
-		}
+		g.render(SQLFiles, &groupCtx)
 
 		for _, f := range ff {
-			ctx := SQLFileContext{
+			fileCtx := SQLFileContext{
 				SQLContext: base,
 				File:       f,
 			}
 
-			err := runner.process(p.Output[SQLFile], &ctx)
-			if err != nil {
-				return err
-			}
+			g.render(SQLFile, &fileCtx)
 
 			for _, q := range f.Queries {
-				ctx := SQLQueryContext{
+				queryCtx := SQLQueryContext{
 					SQLContext: base,
 					Query:      q,
 				}
 
-				err := runner.process(p.Output[SQLQuery], &ctx)
-				if err != nil {
-					return err
-				}
+				g.render(SQLQuery, &queryCtx)
 			}
 		}
 	}
 
-	return nil
+	return g.err
 }
 
 //nolint:recvcheck
@@ -120,6 +112,22 @@ func (q SQLContext) GetType(c *sql.Param, pkg string) string {
 
 var errMissingParam = errors.New("missing Param.Package")
 
+// checkQueryPackages registers the import for every type referenced by qq,
+// covering both the result type and the query parameters.
+func checkQueryPackages(ii *Imports, pkg string, qq []sql.Query) {
+	for _, q := range qq {
+		ii.CheckPackage(q.Result.Type, pkg)
+		checkParamPackages(ii, pkg, q.Params)
+	}
+}
+
+// checkParamPackages registers the import for every type referenced by pp.
+func checkParamPackages(ii *Imports, pkg string, pp sql.Params) {
+	for _, p := range pp {
+		ii.CheckPackage(p.Type, pkg)
+	}
+}
+
 func (q *SQLContext) Init() error {
 	name, ok := q.Params.HasString("Package")
 	if !ok {
@@ -128,13 +136,7 @@ func (q *SQLContext) Init() error {
 
 	for _, set := range q.FileGroups {
 		for _, ff := range set {
-			for _, qry := range ff.Queries {
-				q.CheckPackage(qry.Result.Type, name)
-
-				for _, p := range qry.Params {
-					q.CheckPackage(p.Type, name)
-				}
-			}
+			checkQueryPackages(&q.Imports, name, ff.Queries)
 		}
 	}
 
@@ -148,13 +150,7 @@ func (q *SQLFileGroupContext) Init() error {
 	}
 
 	for _, ff := range q.Files {
-		for _, qry := range ff.Queries {
-			q.CheckPackage(qry.Result.Type, name)
-
-			for _, p := range qry.Params {
-				q.CheckPackage(p.Type, name)
-			}
-		}
+		checkQueryPackages(&q.Imports, name, ff.Queries)
 	}
 
 	return nil
@@ -177,13 +173,7 @@ func (q *SQLFileContext) Init(p *plates.Factory) error {
 		q.Params["Package"] = name
 	}
 
-	for _, qry := range q.Queries {
-		q.CheckPackage(qry.Result.Type, name)
-
-		for _, p := range qry.Params {
-			q.CheckPackage(p.Type, name)
-		}
-	}
+	checkQueryPackages(&q.Imports, name, q.Queries)
 
 	return nil
 }
@@ -194,9 +184,8 @@ func (q *SQLQueryContext) Init() error {
 		return errMissingParam
 	}
 
-	for _, p := range q.Params {
-		q.CheckPackage(p.Type, name)
-	}
+	// q.Params resolves to the embedded sql.Query params, not the process params.
+	checkParamPackages(&q.Imports, name, q.Params)
 
 	return nil
 }

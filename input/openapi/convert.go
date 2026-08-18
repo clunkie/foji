@@ -417,14 +417,31 @@ func (c *converter) fillSchema(out *spec.Schema, in *highbase.Schema) {
 	out.Pattern = in.Pattern
 	out.Required = in.Required
 
-	out.Type = spec.Types(in.Type)
+	// OpenAPI 3.1 expresses nullability as a "null" entry in the type array
+	// rather than 3.0's nullable flag. Normalize to the 3.0 form here so the
+	// type mapper and templates, which read a single type plus Nullable, work
+	// for both dialects.
+	schemaTypes := make(spec.Types, 0, len(in.Type))
+	nullType := false
+
+	for _, t := range in.Type {
+		if t == "null" {
+			nullType = true
+
+			continue
+		}
+
+		schemaTypes = append(schemaTypes, t)
+	}
+
+	out.Type = schemaTypes
 
 	out.Enum = nodeValues(in.Enum)
 	out.Default = nodeValue(in.Default)
 	out.Example = nodeValue(in.Example)
 
 	out.UniqueItems = boolValue(in.UniqueItems)
-	out.Nullable = boolValue(in.Nullable)
+	out.Nullable = boolValue(in.Nullable) || nullType
 	out.ReadOnly = boolValue(in.ReadOnly)
 	out.WriteOnly = boolValue(in.WriteOnly)
 	out.Deprecated = boolValue(in.Deprecated)
